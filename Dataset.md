@@ -9,3 +9,4 @@ Over 2000 speakers representing over 100 native languages read a common elicitat
 The common nature of the dataset makes it ideal for studying accent, being that the wording is provided and the recording quality is (nearly) uniform across all speakers.
 
 Link: http://accent.gmu.edu/
+Download Link: https://www.kaggle.com/rtatman/speech-accent-archive
