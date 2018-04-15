@@ -36,7 +36,7 @@ waveFile.setframerate(RATE)
 waveFile.writeframes(b''.join(frames))
 waveFile.close()
 
-
+# the following lines of code is to get the information about all the devices and their index.
 
 '''
 
