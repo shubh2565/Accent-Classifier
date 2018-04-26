@@ -1,0 +1,451 @@
+Web Scraping Code
+
+from bs4 import BeautifulSoup
+import requests
+import urllib.request
+import time
+import pandas
+import numpy
+
+
+
+# getting the list of languages
+
+languages = []
+url = "http://accent.gmu.edu/browse_language.php"
+r = requests.get(url)
+c = r.content
+soup = BeautifulSoup(c, 'html.parser')
+print(soup.prettify())
+language_lists = soup.findAll('ul', {'class': 'languagelist'})
+    
+for lan in language_lists:
+	for lis in lan.findAll('li'):
+		languages.append(lis.text)
+
+
+
+# get the urls of all languages
+
+urls = []
+for language in languages:
+	urls.append('http://accent.gmu.edu/browse_language.php?function=find&language=' + language)
+
+
+
+# get the number of speakers for each language
+
+num = []
+maximum = 0
+for url in urls:
+	r = requests.get(url)
+	c = r.content
+	soup = BeautifulSoup(c, 'html.parser')
+	test = soup.find_all('div', {'class': 'content'})
+	try:
+		num.append(int(test[0].find('h5').text.split()[2]))
+		maximum = maximum + int(test[0].find('h5').text.split()[2])
+	except AttributeError:
+		num.append(0)
+
+
+
+# get list of tuples (LANGUAGE, LANGUAGE_NUM_SPEAKERS) ignoring language with 0 speakers
+language_num_speakers = []
+for language, no in zip(languages, num):
+	if num != 0:
+		language_num_speakers.append((language, no))
+
+
+
+# from the accent.gmu website, pass in list of languages to scrape mp3 files and save them to disk
+for j in range(len(language_num_speakers)):
+	for i in range(1,language_num_speakers[j][1]+1):
+	 while True:
+	 	try:
+	 		urllib.request.urlretrieve("http://accent.gmu.edu/soundtracks/{0}{1}.mp3".format(lst[j][0], i), '{0}{1}.mp3'.format(lst[j][0], i))
+	 	except:
+	 		time.sleep(2)
+	 	else:
+	 		break
+
+
+
+#Outputs: Pandas Dataframe containing speaker filename, birthplace, native_language, age, sex, age_onset of English
+
+user_data = []
+for n in range(maximum):
+	info = {}
+	url = "http://accent.gmu.edu/browse_language.php?function=detail&speakerid={}".format(n)
+	html = get(url)
+	soup = BeautifulSoup(html.content, 'html.parser')
+	body = soup.find_all('div', {'class': 'content'})
+	try:
+		bio_bar = soup.find_all('ul', {'class':'bio'})
+		info['age'] = float(bio_bar[0].find_all('li')[3].text.split()[2].strip(','))
+		info['age_onset'] = float(bio_bar[0].find_all('li')[4].text.split()[4].strip())
+		info['birthplace'] = str(bio_bar[0].find_all('li')[0].text)[13:-6]
+		info['filename']=str(body[0].find('h5').text.split()[0])
+		info['native_language'] = str(bio_bar[0].find_all('li')[1].text.split()[2])
+		info['sex'] = str(bio_bar[0].find_all('li')[3].text.split()[3].strip())
+		info['speakerid'] = n
+		user_data.append(info)
+	except:
+		info['age'] = ''
+		info['age_onset'] = ''
+		info['birthplace'] = ''
+		info['filename']= ''
+		info['native_language'] = ''
+		info['sex'] = ''
+		info['speakerid'] = ''
+		user_data.append(info)
+            
+            
+        
+df = pandas.DataFrame(user_data)
+df.to_csv('speaker.csv')
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+MFCC code
+
+import numpy
+import scipy.io.wavfile
+from scipy.fftpack import dct
+import librosa.display
+import matplotlib.pyplot as plt
+
+
+
+# loading of signal
+sample_rate, signal = scipy.io.wavfile.read('/home/shubham/Accent/recordings_wav/bengali1.wav')  
+signal = signal[0:int(10 * sample_rate)]  # Keep the first 10 seconds
+
+
+# Pre-Emphasis of signal
+pre_emphasis = 0.97
+emphasized_signal = numpy.append(signal[0], signal[1:] - pre_emphasis * signal[:-1])
+
+
+# Framing of signal
+frame_size = 0.025
+frame_stride = 0.01
+frame_length, frame_step = frame_size * sample_rate, frame_stride * sample_rate  # Convert from seconds to samples
+signal_length = len(emphasized_signal)
+frame_length = int(round(frame_length))
+frame_step = int(round(frame_step))
+num_frames = int(numpy.ceil(float(numpy.abs(signal_length - frame_length)) / frame_step)) 
+
+pad_signal_length = num_frames * frame_step + frame_length
+z = numpy.zeros((pad_signal_length - signal_length))
+# Pad Signal to make sure that all frames have equal number of samples 
+pad_signal = numpy.append(emphasized_signal, z)
+
+indices = numpy.tile(numpy.arange(0, frame_length), (num_frames, 1)) + numpy.tile(numpy.arange(0, 
+	num_frames * frame_step, frame_step), (frame_length, 1)).T
+frames = pad_signal[indices.astype(numpy.int32, copy=False)]
+
+
+# Window using Hamming Window
+frames *= numpy.hamming(frame_length)
+
+
+#taking Fourier-Transform and finding Power Spectrum
+NFFT = 512
+mag_frames = numpy.absolute(numpy.fft.rfft(frames, NFFT))  # Magnitude of the FFT
+pow_frames = ((1.0 / NFFT) * ((mag_frames) ** 2))  # Power Spectrum
+
+nfilt = 40
+low_freq_mel = 0
+high_freq_mel = (2595 * numpy.log10(1 + (sample_rate / 2) / 700))  # Convert Hz to Mel
+mel_points = numpy.linspace(low_freq_mel, high_freq_mel, nfilt + 2)  # Equally spaced in Mel scale
+hz_points = (700 * (10**(mel_points / 2595) - 1))  # Convert Mel to Hz
+bin = numpy.floor((NFFT + 1) * hz_points / sample_rate)
+
+
+# computing Filter Banks
+fbank = numpy.zeros((nfilt, int(numpy.floor(NFFT / 2 + 1))))
+for m in range(1, nfilt + 1):
+    f_m_minus = int(bin[m - 1])   # left
+    f_m = int(bin[m])             # center
+    f_m_plus = int(bin[m + 1])    # right
+
+    for k in range(f_m_minus, f_m):
+        fbank[m - 1, k] = (k - bin[m - 1]) / (bin[m] - bin[m - 1])
+    for k in range(f_m, f_m_plus):
+        fbank[m - 1, k] = (bin[m + 1] - k) / (bin[m + 1] - bin[m])
+filter_banks = numpy.dot(pow_frames, fbank.T)
+filter_banks = numpy.where(filter_banks == 0, numpy.finfo(float).eps, filter_banks)  # Numerical Stability
+filter_banks = 20 * numpy.log10(filter_banks)  # dB
+
+
+# applying Discrete Cosine Transform (DCT) to decorrelate the filter bank coefficients
+num_ceps = 12
+mfcc = dct(filter_banks, type=2, axis=1, norm='ortho')[:, 1 : (num_ceps + 1)] # Keep 2-13
+mfcc -= (numpy.mean(mfcc, axis=0) + 1e-8)
+print(len(mfcc))
+
+
+# plotting the mfcc features
+plt.figure(figsize=(10, 4))
+librosa.display.specshow(mfcc, x_axis='time')
+plt.colorbar()
+plt.title('MFCC')
+plt.tight_layout()
+plt.show()
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Speech to Text Conversion
+
+import speech_recognition as sr
+
+
+text = []
+
+
+r = sr.Recognizer()
+with sr.WavFile("file.wav") as source:              # use "test.wav" as the audio source
+    r.adjust_for_ambient_noise(source)
+    audio = r.record(source)                        # extract audio data from the file
+
+try:
+	text = r.recognize_google(audio)                # recognize speech using Google Speech Recognition
+except LookupError:                                 # speech is unintelligible
+    print("Could not understand audio")
+
+
+print(text)
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+ANN Code
+
+import numpy as np
+import pandas as pd
+
+
+dataset1 = np.load('spanish_female.npy')
+dataset2 = np.load('spanish_male.npy')
+dataset3 = np.load('usa_female.npy')
+dataset4 = np.load('usa_male.npy')
+dataset5 = np.load('arabic_female.npy')
+dataset6 = np.load('arabic_male.npy')
+dataset7 = np.load('indian_accent_part1.npy')
+dataset8 = np.load('indian_accent_part2.npy')
+dataset9 = np.load('uk_accent.npy')
+
+
+features = np.concatenate((dataset7, dataset8, dataset3, dataset4), axis=0)
+
+
+
+X = features
+
+y = np.concatenate((np.ones(194), np.zeros(361)), axis=0)
+
+
+
+# splitting the dataset into training and test set
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=0)
+
+
+
+# feature scaling so that no variable dominates over the other(s)
+from sklearn.preprocessing import StandardScaler
+feature = StandardScaler()
+X_train = feature.fit_transform(X_train)
+X_test = feature.transform(X_test)
+
+
+
+# applying Principal Component Analysis
+from sklearn.decomposition import KernelPCA
+kpca = KernelPCA(n_components = 13, kernel='rbf')
+X_train = kpca.fit_transform(X_train)
+X_test = kpca.transform(X_test)
+
+
+
+import keras
+from keras.models import Sequential
+from keras.layers import Dense
+from sklearn.metrics import confusion_matrix
+
+
+
+# initializing the ANN and adding input and first hidden layer
+classifier = Sequential()
+classifier.add(Dense(units=6, kernel_initializer='glorot_uniform',activation='relu',input_dim=13))
+
+# adding second and third hidden layer
+classifier.add(Dense(units=6, kernel_initializer='glorot_uniform',activation='relu'))
+classifier.add(Dense(units=6, kernel_initializer='glorot_uniform',activation='relu'))
+
+
+# adding output layer
+classifier.add(Dense(units=1, kernel_initializer='glorot_uniform',activation='sigmoid'))
+
+# compiling the ANN
+classifier.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+# fitting the ANN to traing set
+classifier.fit(X_train, y_train, batch_size=8, epochs=100)
+
+# prediction
+y_pred = classifier.predict(X_test)
+y_pred =(y_pred > 0.5)
+
+# confusion matrix
+cm = confusion_matrix(y_test, y_pred)
+print('\n\nConfusion Matrix:\n{}\n\n'.format(cm))
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Recording and Saving Audio file in Python Code
+
+import pyaudio
+import wave
+ 
+FORMAT = pyaudio.paInt16
+CHANNELS = 2
+RATE = 44100
+CHUNK = 1024
+RECORD_SECONDS = 20
+WAVE_OUTPUT_FILENAME = "file.wav"
+ 
+audio = pyaudio.PyAudio()
+ 
+# start Recording
+stream = audio.open(format=FORMAT, channels=CHANNELS,
+                rate=RATE, input=True,
+                frames_per_buffer=CHUNK,
+                input_device_index=5)
+print("recording...")
+frames = []
+ 
+for i in range(0, int(RATE / CHUNK * RECORD_SECONDS)):
+    data = stream.read(CHUNK)
+    frames.append(data)
+print("finished recording")
+ 
+ 
+# stop Recording
+stream.stop_stream()
+stream.close()
+audio.terminate()
+ 
+waveFile = wave.open(WAVE_OUTPUT_FILENAME, 'wb')
+waveFile.setnchannels(CHANNELS)
+waveFile.setsampwidth(audio.get_sample_size(FORMAT))
+waveFile.setframerate(RATE)
+waveFile.writeframes(b''.join(frames))
+waveFile.close()
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+LCD Display Code Code
+
+#include <LiquidCrystal.h>
+ 
+// initialize the library with the numbers of the interface pins
+LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
+ 
+void setup() {
+  Serial.begin(9600);
+  lcd.begin(16, 2);
+  lcd.print("start");
+}
+ 
+void loop() {
+  int cur = 0;
+  if (Serial.available()) {
+    delay(100);  //wait some time for the data to fully be read
+    lcd.clear();
+    while (Serial.available() > 0) {
+      int counter = 0;
+      char c1 = Serial.read();
+      lcd.setCursor(cur,0);
+      lcd.print(c1);
+      cur++;
+      delay(100); //Delay is included to make the sentence look readable
+      if (cur == 16)
+      {
+        lcd.clear();
+        lcd.begin(16,2);
+        cur = 0;
+      }
+    }
+  }
+}
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Final Code
+
+import experiment1 as module1
+import serial
+import time
+
+from importlib import reload
+
+
+
+
+import librosa
+from numpy  import array, reshape
+
+
+s = serial.Serial("/dev/ttyACM0", 9600)       #port is 11 (for COM12), and baud rate is 9600
+time.sleep(2)                                 #wait for the Serial to initialize
+s.write('Ready...'.encode())
+
+
+choice = 'y'
+
+while choice is 'y':
+
+	
+	if 'record_audio' in dir():
+		reload(record_audio)
+	else:
+		import record_audio
+
+	y, sr = librosa.load('/home/shubham/Accent/file.wav')
+	y = y[0:int(10 * sr)]
+	mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+	mfcc = [j for i in mfccs for j in i]
+	mfcc = array( mfcc )
+	mfcc = mfcc.reshape(1, -1)
+	mfcc = module1.feature.transform(mfcc)
+	mfcc_pca = module1.kpca.transform(mfcc)
+	answer = module1.classifier.predict(mfcc_pca)
+	if answer > 0.5:
+
+		str = 'Indian Accent   '
+
+		if 'speech_to_text' in dir():
+			reload(speech_to_text)
+			str = str + speech_to_text.text
+			chunks, chunk_size = len(str), 16
+			sentence = [ str[i:i+chunk_size] for i in range(0, chunks, chunk_size) ]
+			for i in range(len(sentence)):
+				s.write(sentence[i].encode())
+				time.sleep(1.6)
+		else:
+			import speech_to_text
+			str = str + speech_to_text.text
+			chunks, chunk_size = len(str), 16
+			sentence = [ str[i:i+chunk_size] for i in range(0, chunks, chunk_size) ]
+			for i in range(len(sentence)):
+				s.write(sentence[i].encode())
+				time.sleep(1.6)
+
+	else:
+		str = 'American Accent '
+		s.write(str.encode())
+
+	choice = input('Do you want to test again (y/n) : ')
+
+	-------------------------------------------------------------------------------------------------------------------------------------------------------
